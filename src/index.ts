@@ -2,10 +2,17 @@ import * as assert from 'assert';
 import {EventEmitter} from "events";
 import * as util from "util";
 
-interface IMessageInfo {
+export interface IMessageInfo {
   args: any[],
   type: string,
   stack: string,
+}
+
+export interface IMessageMatch {
+  type: "log" | "warn" | "error";
+  args: any[];
+  dev?: boolean;
+  match?: (allowedMessage: IMessageMatch, receivedMessage: IMessageInfo) => boolean;
 }
 
 export default class MockConsole {
@@ -14,6 +21,8 @@ export default class MockConsole {
   private receivedMessages: Array<IMessageInfo>;
 
   private expectedMessages: Array<IMessageInfo>;
+
+  private allowedMessages: Array<IMessageMatch>;
 
   private events: EventEmitter;
 
@@ -65,6 +74,7 @@ export default class MockConsole {
       // clean history
       this.receivedMessages.splice(0);
       this.expectedMessages.splice(0);
+      this.allowedMessages.splice(0);
 
       return;
     }
@@ -94,7 +104,7 @@ ${stack}`);
     }
   }
 
-  private printArgs(messageInfo: IMessageInfo) {
+  private printArgs(messageInfo: { type: string; args: any[] }) {
     return JSON.stringify({
       type: messageInfo.type,
       arguments: messageInfo.args.map(arg =>
@@ -141,6 +151,12 @@ ${stack}`);
     }
   }
 
+  public allow(allowedMessage: IMessageMatch) {
+    this.receivedMessages = this.receivedMessages
+      .filter(receivedMessage => !this.match(allowedMessage, receivedMessage));
+    this.allowedMessages.push(allowedMessage);
+  }
+
   private expect(type: string, args: any[]) {
     const {
       receivedMessages,
@@ -179,6 +195,9 @@ ${stack}`);
 
     // const args = messageInfo.args;
 
+    if (this.allowedMessages.some(allowedMessage => this.match(allowedMessage, messageInfo))) {
+      return;
+    }
     if (expectedMessages.length > 0) {
       this.checkMessage(expectedMessages.shift(), messageInfo, false);
 
@@ -188,6 +207,13 @@ ${stack}`);
     } else {
       receivedMessages.push(messageInfo);
     }
+  }
+
+  private match(allowedMessage: IMessageMatch, receivedMessage: IMessageInfo) {
+      if (allowedMessage.dev && process.env.NODE_ENV === "production") return false;
+      return allowedMessage.match
+        ? allowedMessage.match(allowedMessage, receivedMessage)
+        : this.printArgs(allowedMessage) === this.printArgs(receivedMessage);
   }
 
   private checkMessage(expected: IMessageInfo, actual: IMessageInfo, justReceived: boolean) {
@@ -271,6 +297,7 @@ ${actualStack}`;
   public wrapConsole() {
     this.receivedMessages = [];
     this.expectedMessages = [];
+    this.allowedMessages = [];
     this.mockedConsole = global.console;
 
     this.events = new EventEmitter();
